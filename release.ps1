@@ -11,8 +11,8 @@ $tag = "v$version"
 if ($Publish) {
   if (-not (gh auth token)) { throw 'Not signed in to GitHub. Run: gh auth login' }
   if (git status --porcelain) { throw 'Commit your changes first, so the release matches the code.' }
-  gh release view $tag *> $null
-  if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists. Raise the version in package.json first." }
+  $existing = @(gh release list --limit 200 --json tagName --jq '.[].tagName')
+  if ($existing -contains $tag) { throw "Release $tag already exists. Raise the version in package.json first." }
 }
 
 # Build only; uploading is done below in one step (electron-builder's own uploader can race itself).
