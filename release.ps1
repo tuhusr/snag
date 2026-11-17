@@ -1,26 +1,37 @@
 # Builds the Snag installer and a zip of it.
-#   .\release.ps1            build only            (dist\Snag-Setup-<v>.exe + dist\Snag-<v>.zip)
-#   .\release.ps1 -Publish   build + publish to GitHub Releases, so installed copies offer the update
-param([switch]$Publish)
+#   .\release.ps1                          build only     (dist\Snag-Setup-<v>.exe + dist\Snag-<v>.zip)
+#   .\release.ps1 -Publish [-Notes "..."]  build + publish to GitHub Releases, so installed copies offer the update
+param([switch]$Publish, [string]$Notes = '')
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
 $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+$tag = "v$version"
+
 if ($Publish) {
-  $env:GH_TOKEN = (gh auth token)
-  if (-not $env:GH_TOKEN) { throw 'Not signed in to GitHub. Run: gh auth login' }
+  if (-not (gh auth token)) { throw 'Not signed in to GitHub. Run: gh auth login' }
   if (git status --porcelain) { throw 'Commit your changes first, so the release matches the code.' }
+  gh release view $tag *> $null
+  if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists. Raise the version in package.json first." }
+}
+
+# Build only; uploading is done below in one step (electron-builder's own uploader can race itself).
+npx electron-builder --win nsis --publish never
+if ($LASTEXITCODE) { throw "electron-builder failed ($LASTEXITCODE)" }
+
+$exe = "dist\Snag-Setup-$version.exe"
+$zip = "dist\Snag-$version.zip"
+Compress-Archive -Force -Path $exe -DestinationPath $zip
+Write-Host "Built $exe and $zip"
+
+if ($Publish) {
   # GitHub only publishes a release for a tag that already exists on the remote.
-  $tag = "v$version"
   if (-not (git tag --list $tag)) { git tag $tag }
   git push origin HEAD $tag
   if ($LASTEXITCODE) { throw 'Could not push to GitHub.' }
-  npx electron-builder --win nsis --publish always
-} else {
-  npx electron-builder --win nsis --publish never
+  if (-not $Notes) { $Notes = "Snag $version. Download Snag-Setup-$version.exe and run it. Installed copies update themselves." }
+  # latest.yml + blockmap are what installed copies read to find and download the update.
+  gh release create $tag $exe "$exe.blockmap" 'dist\latest.yml' $zip --title "Snag $version" --notes $Notes --verify-tag
+  if ($LASTEXITCODE) { throw 'Could not create the GitHub release.' }
+  Write-Host "Published $tag"
 }
-if ($LASTEXITCODE) { throw "electron-builder failed ($LASTEXITCODE)" }
-
-$zip = "dist\Snag-$version.zip"
-Compress-Archive -Force -Path "dist\Snag-Setup-$version.exe" -DestinationPath $zip
-Write-Host "Done: dist\Snag-Setup-$version.exe and $zip"
