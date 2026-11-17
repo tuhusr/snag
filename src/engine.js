@@ -3,6 +3,8 @@ const { spawn, execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const os = require('os');
+const crypto = require('crypto');
 
 const YTDLP_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
 // yt-dlp's own FFmpeg builds, patched for the problems yt-dlp hits with stock FFmpeg.
@@ -79,6 +81,7 @@ class Engine {
     this.ytdlp = null;
     this.ffmpegDir = null;
     this.version = null;
+    this.infos = new Map(); // specsKey -> saved video details
   }
 
   managedPath() { return path.join(this.binDir, 'yt-dlp.exe'); }
@@ -174,19 +177,41 @@ class Engine {
     let info = null;
     try { info = JSON.parse(r.stdout); } catch {}
     if (!info || typeof info !== 'object') return failure();
-    return summarize(info, url);
+    const summary = summarize(info, url);
+    if (summary.kind === 'video') {
+      // Keep the details on disk so specs() can ask yt-dlp which streams each choice picks, offline.
+      const dir = path.join(os.tmpdir(), 'snag-info');
+      fs.mkdirSync(dir, { recursive: true });
+      const key = crypto.randomUUID();
+      const file = path.join(dir, `${key}.json`);
+      fs.writeFileSync(file, r.stdout);
+      const formats = new Map((info.formats && info.formats.length ? info.formats : [info]).map((f) => [String(f.format_id), f]));
+      this.infos.set(key, { file, formats, duration: info.duration || null });
+      // Only the latest few previews are kept.
+      for (const [k, v] of [...this.infos].slice(0, -8)) { try { fs.unlinkSync(v.file); } catch {} this.infos.delete(k); }
+      summary.specsKey = key;
+    }
+    return summary;
+  }
+
+  // Exactly which streams a choice downloads, decided by yt-dlp itself from the saved details (no network).
+  async specs(key, mode, height) {
+    const entry = this.infos.get(key);
+    if (!entry) return null;
+    const fa = formatArgs(mode, height);
+    const pick = [];
+    for (let i = 0; i < fa.length; i++) if (fa[i] === '-f' || fa[i] === '-S') pick.push(fa[i], fa[++i]);
+    const r = await run(this.ytdlp, ['--ignore-config', '--no-warnings', '--load-info-json', entry.file, ...pick, '--print', 'format_id'], { env: this.env() });
+    const ids = r.stdout.trim().split(/\r?\n/).pop();
+    if (!ids) return null;
+    const picked = ids.split('+').map((id) => entry.formats.get(id)).filter(Boolean);
+    return picked.length ? describe(picked, mode, entry.duration) : null;
   }
 
   // job: { url, mode: 'video'|'h264'|'mp3'|'m4a', height, folder, kind }
   download(job, settings, onUpdate) {
     const video = job.mode === 'video' || job.mode === 'h264';
-    const res = job.height ? `res:${job.height}` : 'res';
-    const fmt = {
-      video: ['-f', 'bv*+ba/b', '-S', `${res},fps,hdr:12,vbr,abr,asr`, '--merge-output-format', 'mp4', '--remux-video', 'mp4'],
-      h264: ['-f', 'bv*+ba/b', '-S', `vcodec:h264,${res},fps,acodec:aac,vbr,abr`, '--merge-output-format', 'mp4', '--remux-video', 'mp4'],
-      mp3: ['-f', 'ba/b', '-x', '--audio-format', 'mp3', '--audio-quality', '0'],
-      m4a: ['-f', 'ba[ext=m4a]/ba/b', '-x', '--audio-format', 'm4a', '--audio-quality', '0'],
-    }[job.mode];
+    const fmt = formatArgs(job.mode, job.height);
 
     const out = job.kind === 'playlist'
       ? '%(playlist_title,playlist_id).120B/%(playlist_index)03d %(title).160B.%(ext)s'
@@ -200,7 +225,7 @@ class Engine {
       '--progress-template', `download:${MARK}DL|%(info.format_id)s|%(progress)j`,
       '--progress-template', `postprocess:${MARK}PP|%(progress.postprocessor)s|%(progress.status)s`,
       '--print', `video:${MARK}ITEM|%(playlist_index|)s|%(n_entries,playlist_count|)s|%(filesize,filesize_approx|0)s|%(height|)s|%(title)s`,
-      '--print', `after_move:${MARK}FILE|%(filepath)s`,
+      '--print', `after_move:${MARK}FILE|%(width|)s|%(height|)s|%(fps|)s|%(vcodec|)s|%(acodec|)s|%(abr|)s|%(asr|)s|%(audio_channels|)s|%(dynamic_range|)s|%(duration|)s|%(filepath)s`,
       ...fmt,
       ...(settings.metadata !== false ? ['--embed-metadata', '--embed-chapters'] : []),
       ...(settings.thumbnail !== false ? ['--embed-thumbnail'] : []),
@@ -249,7 +274,18 @@ class Engine {
         const name = rest[0];
         if (rest[1] === 'started') emit({ status: 'processing', stage: STAGES[name] || 'Processing', percent: overall(1), speed: null, eta: null });
       } else if (kind === 'FILE') {
-        st.files.push(rest.join('|'));
+        const [w, h, fps, vcodec, acodec, abr, asr, ch, dr, dur, ...p] = rest;
+        const num = (x) => (x && x !== 'NA' && isFinite(Number(x)) ? Number(x) : null);
+        const str = (x) => (x && x !== 'NA' && x !== 'none' ? x : null);
+        const file = p.join('|');
+        st.files.push(file);
+        st.specs = {
+          width: num(w), height: num(h), fps: num(fps), vcodec: str(vcodec), acodec: str(acodec),
+          abr: num(abr), asr: num(asr), channels: num(ch), hdr: str(dr) && dr !== 'SDR' ? dr : null,
+          duration: num(dur), ext: path.extname(file).slice(1).toLowerCase(),
+        };
+        // An extracted MP3/M4A keeps the source codec name in the info; report what is actually in the file.
+        if (job.mode === 'mp3' || job.mode === 'm4a') Object.assign(st.specs, { vcodec: null, width: null, height: null, fps: null, hdr: null, acodec: job.mode === 'mp3' ? 'mp3' : st.specs.acodec });
       }
     };
 
@@ -275,7 +311,13 @@ class Engine {
       if (code === 0 || (st.files.length && !st.errors.length)) {
         let size = null;
         try { size = st.files.reduce((n, f) => n + fs.statSync(f).size, 0); } catch {}
-        return onUpdate({ status: 'done', percent: 1, speed: null, eta: null, file: st.files[st.files.length - 1] || null, files: st.files, size, stage: null });
+        let specs = null;
+        if (st.specs && st.files.length === 1) {
+          // Real average bitrate of the saved file: bytes over running time.
+          const bitrate = size && st.specs.duration ? (size * 8) / st.specs.duration : null;
+          specs = { ...st.specs, bitrate };
+        }
+        return onUpdate({ status: 'done', percent: 1, speed: null, eta: null, file: st.files[st.files.length - 1] || null, files: st.files, size, specs, stage: null });
       }
       onUpdate({ status: 'error', speed: null, eta: null, error: explain(st.errors.pop() || `Engine stopped (code ${code}).`) });
     });
@@ -321,37 +363,63 @@ function summarize(info, url) {
       thumbnail: bestThumb(info),
     };
   }
-  const formats = info.formats || [];
-  const vids = formats.filter((f) => f.vcodec !== 'none' && f.height);
-  const auds = formats.filter((f) => f.vcodec === 'none' && f.acodec && f.acodec !== 'none');
-  const dur = info.duration || 0;
-  const rate = (f) => f.vbr || f.tbr || 0;
-  // Only exact sizes are shown: streaming (m3u8) bitrates are nominal and can be off by 2-3x.
-  const topAudio = auds.reduce((m, f) => ((f.abr || f.tbr || 0) > (m ? m.abr || m.tbr || 0 : -1) ? f : m), null);
-  const audioSize = topAudio ? topAudio.filesize || 0 : 0;
-
-  const byHeight = {};
-  for (const f of vids) {
-    const h = f.height;
-    const cur = byHeight[h] || { height: h, fps: 0, hdr: false, top: null };
-    cur.fps = Math.max(cur.fps, f.fps || 0);
-    cur.hdr = cur.hdr || (f.dynamic_range && f.dynamic_range !== 'SDR');
-    if (!cur.top || rate(f) > rate(cur.top)) cur.top = f; // the stream "Best" will pick at this height
-    byHeight[h] = cur;
-  }
-  const qualities = Object.values(byHeight).sort((a, b) => b.height - a.height).map(({ top, ...q }) => {
-    const muxed = top.acodec && top.acodec !== 'none';
-    q.size = top.filesize && (muxed || audioSize) ? top.filesize + (muxed ? 0 : audioSize) : null;
-    return q;
+  const formats = (info.formats && info.formats.length ? info.formats : [info]);
+  const vids = formats.filter((f) => f.vcodec && f.vcodec !== 'none' && f.height && f.ext !== 'mhtml');
+  // yt-dlp's "res" is the shorter side, so a 720x1280 phone video is 720p.
+  const res = (f) => (f.width && f.height ? Math.min(f.width, f.height) : f.height);
+  const qualities = [...new Set(vids.map(res))].sort((a, b) => b - a).map((r) => {
+    const at = vids.filter((f) => res(f) === r);
+    return { height: r, fps: Math.max(...at.map((f) => f.fps || 0)), hdr: at.some((f) => f.dynamic_range && f.dynamic_range !== 'SDR') };
   });
-  const bestAudio = audioSize;
 
   return {
     kind: 'video', url: info.webpage_url || url, id: info.id, title: info.title || info.id || 'Video', site,
     uploader: info.uploader || info.channel || info.creator || info.uploader_id || null,
-    duration: dur || null, thumbnail: bestThumb(info), qualities,
-    audioSize: bestAudio || null, hasVideo: vids.length > 0 || !formats.length || formats.some((f) => f.vcodec !== 'none'),
+    duration: info.duration || null, thumbnail: bestThumb(info), qualities,
+    hasVideo: vids.length > 0 || formats.some((f) => f.vcodec && f.vcodec !== 'none'),
     isLive: !!info.is_live,
+  };
+}
+
+// Format choice per mode. Shared by download() and specs() so the preview always matches the download.
+// "lang" first keeps the original audio track over dubbed ones.
+function formatArgs(mode, height) {
+  const res = height ? `res:${height}` : 'res';
+  return {
+    video: ['-f', 'bv*+ba/b', '-S', `lang,${res},fps,hdr:12,vbr,abr,asr`, '--merge-output-format', 'mp4', '--remux-video', 'mp4'],
+    h264: ['-f', 'bv*+ba/b', '-S', `lang,vcodec:h264,${res},fps,acodec:aac,vbr,abr`, '--merge-output-format', 'mp4', '--remux-video', 'mp4'],
+    mp3: ['-f', 'ba/b', '-S', 'lang,abr,asr', '-x', '--audio-format', 'mp3', '--audio-quality', '0'],
+    m4a: ['-f', 'ba[ext=m4a]/ba/b', '-S', 'lang,abr,asr', '-x', '--audio-format', 'm4a', '--audio-quality', '0'],
+  }[mode];
+}
+
+// Describe the streams yt-dlp picked, in the shape the spec sheet shows.
+function describe(picked, mode, duration) {
+  const hasV = (f) => f.vcodec && f.vcodec !== 'none';
+  const hasA = (f) => f.acodec && f.acodec !== 'none';
+  const audioMode = mode === 'mp3' || mode === 'm4a';
+  const v = audioMode ? null : picked.find(hasV) || null;
+  const a = picked.find((f) => hasA(f) && !hasV(f)) || picked.find(hasA) || null;
+  const peak = (f) => /^m3u8/.test(f.protocol || ''); // HLS lists peak bitrate, not average
+  const video = v && {
+    width: v.width || null, height: v.height || null, fps: v.fps || null, codec: v.vcodec || null,
+    kbps: v.vbr || (hasA(v) ? null : v.tbr) || null, totalKbps: hasA(v) ? v.tbr || null : null,
+    peak: peak(v), hdr: v.dynamic_range && v.dynamic_range !== 'SDR' ? v.dynamic_range : null,
+  };
+  const audio = a && {
+    codec: a.acodec || null, kbps: a.abr || (hasV(a) ? null : a.tbr) || null, asr: a.asr || null,
+    channels: a.audio_channels || null, peak: peak(a), shared: a === v,
+  };
+  const used = audioMode ? [a].filter(Boolean) : picked;
+  let size = null, sizeExact = false;
+  if (mode === 'mp3') size = duration ? (duration * 245000) / 8 : null; // VBR V0 averages about 245 kbps
+  else if (used.length && used.every((f) => f.filesize) && !(mode === 'm4a' && a && a.ext !== 'm4a')) {
+    size = used.reduce((n, f) => n + f.filesize, 0); sizeExact = true;
+  }
+  return {
+    video, audio, size, sizeExact,
+    container: { video: 'MP4', h264: 'MP4', mp3: 'MP3', m4a: 'M4A' }[mode],
+    convert: mode === 'mp3' ? 'MP3 VBR, about 245 kbps' : mode === 'm4a' && a && a.ext !== 'm4a' ? 'AAC' : null,
   };
 }
 

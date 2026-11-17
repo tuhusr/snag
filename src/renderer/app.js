@@ -35,7 +35,46 @@ function left(s) {
   return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min left`;
 }
 const siteName = (s) => SITE_NAME[s] || (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : '');
-const qualityName = (q) => `${q.height}p${q.fps > 30 ? Math.round(q.fps) : ''}${q.hdr ? ' HDR' : ''}`;
+const tier = (h) => (h >= 4320 ? ' 8K' : h >= 2160 ? ' 4K' : h >= 1440 ? ' 2K' : '');
+const qualityName = (q) => `${q.height}p${q.fps > 30 ? Math.round(q.fps) : ''}${tier(q.height)}${q.hdr ? ' HDR' : ''}`;
+
+// ---------- spec wording ----------
+function codecName(c) {
+  if (!c) return '';
+  const s = c.toLowerCase();
+  if (/^(avc|h264)/.test(s)) return 'H.264';
+  if (/^(hev|hvc|h265|bytevc1)/.test(s)) return 'HEVC';
+  if (/^av01/.test(s)) return 'AV1';
+  if (/^vp0?9/.test(s)) return 'VP9';
+  if (/^vp0?8/.test(s)) return 'VP8';
+  if (/^(mp4a|aac)/.test(s)) return 'AAC';
+  if (s === 'opus') return 'Opus';
+  if (s === 'vorbis') return 'Vorbis';
+  if (s === 'mp3') return 'MP3';
+  if (s === 'flac') return 'FLAC';
+  if (/^ec-?3/.test(s)) return 'Dolby Digital Plus';
+  if (/^ac-?3/.test(s)) return 'Dolby Digital';
+  return c.split('.')[0].toUpperCase();
+}
+const kbpsText = (k) => (!k ? '' : k >= 1000 ? `${(k / 1000).toFixed(k >= 100000 ? 0 : 1)} Mbps` : `${Math.round(k)} kbps`);
+const hzText = (hz) => (hz ? `${+(hz / 1000).toFixed(1)} kHz` : '');
+const channelText = (n) => ({ 1: 'mono', 2: 'stereo', 6: '5.1 surround', 8: '7.1 surround' }[n] || (n ? `${n} channels` : ''));
+const dims = (w, h) => (w && h ? `${w} × ${h}${tier(Math.min(w, h))}` : h ? `${h}p` : '');
+
+// One line of real specs for a finished file (measured average bitrate of the whole file).
+function fileSpecs(s, mode) {
+  if (!s) return [];
+  const out = [];
+  if (s.vcodec || s.width) {
+    out.push(dims(s.width, s.height));
+    out.push([codecName(s.vcodec), s.fps ? `${Math.round(s.fps)} fps` : '', s.hdr || ''].filter(Boolean).join(' '));
+    if (s.acodec) out.push(codecName(s.acodec));
+  } else if (s.acodec || mode) {
+    out.push(codecName(s.acodec) || (mode || '').toUpperCase());
+  }
+  if (s.bitrate) out.push(`${kbpsText(s.bitrate / 1000)} avg`);
+  return out.filter(Boolean);
+}
 const ICON = {
   x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   play: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z"/></svg>',
@@ -147,18 +186,14 @@ function renderPreview() {
 
   let quality = '';
   if (!isAudio && p.kind === 'video' && p.qualities && p.qualities.length) {
-    const top = p.qualities[0];
-    const sz = (q) => (state.mode === 'video' && q.size ? `, about ${bytes(q.size)}` : '');
     quality = `<label class="sr" for="quality">Quality</label><select id="quality">
-      <option value="">Best (${qualityName(top)}${sz(top)})</option>
-      ${p.qualities.slice(1).map((q) => `<option value="${q.height}" ${state.height === q.height ? 'selected' : ''}>${qualityName(q)}${sz(q)}</option>`).join('')}
+      <option value="">Best (${qualityName(p.qualities[0])})</option>
+      ${p.qualities.slice(1).map((q) => `<option value="${q.height}" ${state.height === q.height ? 'selected' : ''}>${qualityName(q)}</option>`).join('')}
     </select>`;
   } else if (!isAudio && p.kind === 'playlist') {
     quality = `<label class="sr" for="quality">Quality</label><select id="quality">
       <option value="">Best available</option>${[2160, 1440, 1080, 720, 480, 360].map((h) => `<option value="${h}" ${state.height === h ? 'selected' : ''}>Up to ${h}p</option>`).join('')}
     </select>`;
-  } else if (isAudio && p.audioSize) {
-    quality = `<span class="facts">About ${bytes(p.audioSize)}</span>`;
   }
 
   preview.innerHTML = `<div class="card">
@@ -173,6 +208,7 @@ function renderPreview() {
         ${quality}
         <button class="btn primary" id="startDl">${p.kind === 'playlist' ? `Download ${p.count || 'all'}` : 'Download'}</button>
       </div>
+      ${p.specsKey ? '<dl class="specs" id="specs" aria-live="polite"></dl>' : ''}
     </div>
   </div>`;
 
@@ -184,9 +220,59 @@ function renderPreview() {
     renderPreview();
   });
   const q = $('#quality');
-  if (q) q.onchange = () => { state.height = q.value ? Number(q.value) : null; };
+  if (q) q.onchange = () => { state.height = q.value ? Number(q.value) : null; renderSpecs(); };
   $('#startDl').onclick = startDownload;
   $('#startDl').focus();
+  renderSpecs();
+}
+
+// ---------- spec sheet ----------
+const specCache = new Map(); // "key|mode|height" -> specs | Promise
+
+function fetchSpecs(key, mode, height) {
+  const id = `${key}|${mode}|${height || 'best'}`;
+  if (!specCache.has(id)) specCache.set(id, window.snag.specs(key, mode, height).then((s) => { specCache.set(id, s || false); return s; }));
+  return specCache.get(id);
+}
+
+async function renderSpecs() {
+  const p = state.preview;
+  const box = $('#specs');
+  if (!p || !p.specsKey || !box) return;
+  const audioMode = state.mode === 'mp3' || state.mode === 'm4a';
+  const height = audioMode ? null : state.height;
+  const id = `${p.specsKey}|${state.mode}|${height || 'best'}`;
+  let s = specCache.get(id);
+  if (s === undefined || s instanceof Promise) {
+    box.classList.add('wait');
+    box.innerHTML = `<div><dt>${audioMode ? 'Audio' : 'Video'}</dt><dd>Checking the exact streams</dd></div>`;
+    s = await fetchSpecs(p.specsKey, state.mode, height);
+    if (state.preview !== p || id !== `${p.specsKey}|${state.mode}|${(audioMode ? null : state.height) || 'best'}`) return; // choice changed meanwhile
+  }
+  box.classList.remove('wait');
+  box.innerHTML = s ? specsHtml(s) : '<div><dt>Specs</dt><dd class="sub">This site does not list stream details. They show on the file once it downloads.</dd></div>';
+  if (!audioMode) for (const q of p.qualities || []) fetchSpecs(p.specsKey, state.mode, q.height); // warm the rest quietly
+}
+
+function specsHtml(s) {
+  const col = (label, lines) => `<div><dt>${label}</dt>${lines.filter(Boolean).map((l, i) => `<dd${i ? ' class="sub"' : ''}>${esc(l)}</dd>`).join('')}</div>`;
+  const cols = [];
+  const v = s.video, a = s.audio;
+  if (v) {
+    const rateLine = v.kbps ? `${v.peak ? 'Peak ' : ''}${kbpsText(v.kbps)}` : v.totalKbps ? `${kbpsText(v.totalKbps)} with audio` : '';
+    cols.push(col('Video', [dims(v.width, v.height), [codecName(v.codec), v.fps ? `${Math.round(v.fps)} fps` : ''].filter(Boolean).join(', '), rateLine, v.hdr ? `HDR (${v.hdr})` : '']));
+  }
+  if (a) {
+    const src = [codecName(a.codec), a.kbps ? kbpsText(a.kbps) : ''].filter(Boolean).join(', ');
+    const detail = [hzText(a.asr), channelText(a.channels)].filter(Boolean).join(', ');
+    if (s.convert && s.container === 'MP3') cols.push(col('Audio', [s.convert, src ? `Converted from ${src}` : '', detail]));
+    else if (s.convert) cols.push(col('Audio', [`${s.convert} (converted)`, src ? `From ${src}` : '', detail]));
+    else cols.push(col('Audio', [src || 'Included', detail || (a.shared ? 'Inside the video stream' : '')]));
+  }
+  const extras = state.settings.thumbnail !== false ? ', plus cover art' : '';
+  const size = s.size ? `${s.sizeExact ? '' : 'About '}${bytes(s.size)}${extras}` : 'Size shows once it starts';
+  cols.push(col('File', [s.container, size]));
+  return cols.join('');
 }
 
 async function startDownload() {
@@ -224,7 +310,7 @@ function updateCounts() {
   const active = all.filter((j) => j.status === 'downloading' || j.status === 'processing' || j.status === 'queued').length;
   $('#count').textContent = all.length ? (active ? `${active} active` : `${all.length}`) : '';
   $('#empty').hidden = all.length > 0;
-  $('#clearDone').hidden = !all.some((j) => ['done', 'error', 'canceled'].includes(j.status));
+  $('#clearDone').hidden = state.tab !== 'downloads' || !all.some((j) => ['done', 'error', 'canceled'].includes(j.status));
   document.title = active ? `Snag (${active})` : 'Snag';
 }
 
@@ -283,10 +369,11 @@ function renderJob(id) {
     if (j.kind === 'playlist' && j.item) meta.push(`Video ${j.item} of ${j.count || '?'}`);
     meta.push(j.stage || 'Processing');
   } else if (j.status === 'done') {
-    meta.push('<span class="okay">Done</span>', fmt);
+    meta.push('<span class="okay">Done</span>');
+    const real = fileSpecs(j.specs, j.mode);
+    meta.push(...(real.length ? real : [fmt]));
     if (j.kind === 'playlist' && j.files) meta.push(`${j.files.length} files`);
     if (j.size) meta.push(bytes(j.size));
-    if (j.uploader) meta.push(esc(j.uploader));
   } else if (j.status === 'error') meta.push(`<span class="err">${esc(j.error || 'Download failed.')}</span>`);
   else if (j.status === 'canceled') meta.push('Canceled');
 
@@ -331,6 +418,115 @@ window.snag.onJob((j) => {
   state.jobs.set(j.id, j);
   queueRender(j.id);
   if (prev && prev.status !== 'done' && j.status === 'done' && document.hidden === false) toast(`Saved ${j.kind === 'playlist' ? j.title : (j.title || 'video')}`);
+});
+
+// ---------- tabs ----------
+state.tab = 'downloads';
+function showTab(name, focus = false) {
+  state.tab = name;
+  for (const [tab, pane, key] of [['#tabDownloads', '#paneDownloads', 'downloads'], ['#tabHistory', '#paneHistory', 'history']]) {
+    const on = key === name;
+    $(tab).setAttribute('aria-selected', String(on));
+    $(tab).tabIndex = on ? 0 : -1;
+    $(pane).hidden = !on;
+  }
+  if (focus) $(name === 'history' ? '#tabHistory' : '#tabDownloads').focus();
+  if (name === 'history') loadHistory();
+  updateCounts();
+  renderHistoryChrome();
+}
+$('#tabDownloads').onclick = () => showTab('downloads');
+$('#tabHistory').onclick = () => showTab('history');
+$('.tabs').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); showTab(state.tab === 'downloads' ? 'history' : 'downloads', true); }
+});
+
+// ---------- history ----------
+const hist = { items: [], loaded: false, query: '', limit: 150 };
+const histList = $('#histList');
+
+async function loadHistory() {
+  hist.items = await window.snag.library();
+  hist.loaded = true;
+  renderHistory();
+}
+
+function dayLabel(ts) {
+  const d = new Date(ts), now = new Date();
+  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((start(now) - start(d)) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
+}
+
+function renderHistoryChrome() {
+  $('#histCount').textContent = hist.loaded && hist.items.length ? String(hist.items.length) : '';
+  $('#clearHistory').hidden = state.tab !== 'history' || !hist.items.length;
+}
+
+function renderHistory() {
+  renderHistoryChrome();
+  const q = hist.query.trim().toLowerCase();
+  const match = q ? hist.items.filter((x) => [x.title, x.uploader, siteName(x.site), x.url].some((v) => v && String(v).toLowerCase().includes(q))) : hist.items;
+  const shown = match.slice(0, hist.limit);
+  const empty = $('#histEmpty');
+  empty.hidden = shown.length > 0;
+  empty.textContent = hist.items.length ? `Nothing in your history matches "${hist.query.trim()}".` : 'Every video you download is listed here, so you can find it again.';
+  $('#histMore').hidden = match.length <= shown.length;
+  $('#histMore').textContent = `Show more (${match.length - shown.length} left)`;
+
+  const btn = (act, icon, label) => `<button class="icon-btn" data-act="${act}" title="${label}" aria-label="${label}">${ICON[icon]}</button>`;
+  let html = '', day = '';
+  for (const x of shown) {
+    const label = dayLabel(x.finished);
+    if (label !== day) { html += `${day ? '</ul>' : ''}<h3 class="day">${esc(label)}</h3><ul class="jobs">`; day = label; }
+    const fmt = `${MODE_NAME[x.mode] || ''}${(x.mode === 'video' || x.mode === 'h264') && x.height ? ` ${x.height}p` : ''}`;
+    const real = fileSpecs(x.specs, x.mode);
+    const meta = [new Date(x.finished).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }), ...(real.length ? real : [fmt]), x.size ? bytes(x.size) : '', x.uploader || siteName(x.site)];
+    html += `<li class="job" data-id="${esc(x.id)}" data-status="done">
+      <div class="jthumb">${x.thumbnail ? `<img alt="" referrerpolicy="no-referrer" src="${esc(x.thumbnail)}">` : ''}</div>
+      <div class="jbody"><div class="jtitle" title="${esc(x.title)}">${esc(x.title)}</div>
+        <div class="jmeta">${x.exists ? '' : '<span class="missing">File moved or deleted</span>'}${meta.filter(Boolean).map((m) => `<span>${esc(m)}</span>`).join('')}</div></div>
+      <div class="counter"></div>
+      <div class="jactions">${x.exists && x.kind !== 'playlist' ? btn('play', 'play', 'Play') : ''}${x.exists ? btn('show', 'folder', 'Show in folder') : ''}${btn('again', 'retry', 'Download again')}${btn('source', 'link', 'Open the page')}${btn('forget', 'trash', 'Remove from history')}</div>
+    </li>`;
+  }
+  histList.innerHTML = html + (day ? '</ul>' : '');
+  histList.querySelectorAll('.jthumb img').forEach((img) => { img.onerror = () => img.remove(); });
+}
+
+histList.addEventListener('click', async (e) => {
+  const li = e.target.closest('.job');
+  const x = li && hist.items.find((i) => i.id === li.dataset.id);
+  if (!x) return;
+  const act = e.target.closest('[data-act]')?.dataset.act || (e.target.closest('.jthumb') && x.exists ? (x.kind === 'playlist' ? 'show' : 'play') : null);
+  if (act === 'play' || act === 'show') {
+    const ok = act === 'play' ? await window.snag.openFile(x.file) : await window.snag.showFile(x.file || (x.files && x.files[0]));
+    if (!ok) { toast('That file was moved or deleted.'); x.exists = false; renderHistory(); }
+  } else if (act === 'again') {
+    await window.snag.enqueue({ url: x.url, kind: x.kind, mode: x.mode, height: x.height, title: x.title, thumbnail: x.thumbnail, site: x.site, uploader: x.uploader, duration: x.duration, count: x.count });
+    toast('Added to downloads');
+  } else if (act === 'source') window.snag.openExternal(x.url);
+  else if (act === 'forget') {
+    await window.snag.libraryRemove(x.id);
+    hist.items = hist.items.filter((i) => i.id !== x.id);
+    renderHistory();
+  }
+});
+
+let searchTimer;
+$('#histSearch').addEventListener('input', (e) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { hist.query = e.target.value; hist.limit = 150; renderHistory(); }, 120);
+});
+$('#histMore').onclick = () => { hist.limit += 150; renderHistory(); };
+$('#clearHistory').onclick = async () => {
+  if (await window.snag.libraryClear()) { hist.items = []; renderHistory(); toast('History cleared. Your files were not touched.'); }
+};
+window.snag.onLibraryAdd((x) => {
+  hist.items = [x, ...hist.items.filter((i) => i.id !== x.id)];
+  if (state.tab === 'history') renderHistory(); else renderHistoryChrome();
 });
 
 // ---------- engine + settings ----------
@@ -444,5 +640,6 @@ window.snag.onUpdate((u) => { state.update = u; renderUpdate(); });
   updateCounts();
   renderSettings();
   renderEngine();
+  loadHistory();
   input.focus();
 })();

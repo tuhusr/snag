@@ -34,11 +34,26 @@
 
     <section class="downloads">
       <div class="dl-head">
-        <h2>Downloads</h2><span class="count" id="count"></span>
+        <div class="tabs" role="tablist" aria-label="Lists">
+          <button class="tab" role="tab" id="tabDownloads" aria-selected="true" aria-controls="paneDownloads">Downloads<span class="count" id="count"></span></button>
+          <button class="tab" role="tab" id="tabHistory" aria-selected="false" aria-controls="paneHistory" tabindex="-1">History<span class="count" id="histCount"></span></button>
+        </div>
         <button class="link-btn" id="clearDone" hidden>Clear finished</button>
+        <button class="link-btn" id="clearHistory" hidden>Clear history</button>
       </div>
-      <ul class="jobs" id="jobs"></ul>
-      <p class="empty" id="empty">Downloads you start show up here.</p>
+
+      <div id="paneDownloads" role="tabpanel" aria-labelledby="tabDownloads">
+        <ul class="jobs" id="jobs"></ul>
+        <p class="empty" id="empty">Downloads you start show up here.</p>
+      </div>
+
+      <div id="paneHistory" role="tabpanel" aria-labelledby="tabHistory" hidden>
+        <label class="sr" for="histSearch">Search history</label>
+        <input class="search" id="histSearch" type="search" placeholder="Search by title, channel or site" autocomplete="off" spellcheck="false">
+        <div id="histList"></div>
+        <button class="btn more" id="histMore" hidden>Show more</button>
+        <p class="empty" id="histEmpty" hidden></p>
+      </div>
     </section>
   </main>
 

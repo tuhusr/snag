@@ -12,7 +12,7 @@ if (!app.requestSingleInstanceLock()) app.quit();
 const theme = () => (nativeTheme.shouldUseDarkColors
   ? { color: '#161618', symbolColor: '#c8c8ce', height: 44 }
   : { color: '#ffffff', symbolColor: '#3f3f46', height: 44 });
-let win, engine, settings, history;
+let win, engine, settings, library;
 let engineState = { ready: false, busy: 'Starting the engine' };
 let markEngineReady;
 const engineReady = new Promise((r) => { markEngineReady = r; });
@@ -46,12 +46,18 @@ function setupUpdates() {
 const sendJob = (j) => win && !win.isDestroyed() && win.webContents.send('job', j);
 const sendEngine = () => win && !win.isDestroyed() && win.webContents.send('engine', engineState);
 
-function persistHistory() {
-  const list = [...jobs.values()]
-    .filter((j) => ['done', 'error', 'canceled'].includes(j.status))
-    .sort((a, b) => b.created - a.created)
-    .slice(0, 300);
-  history.set({ jobs: list });
+// History: every finished download, kept across restarts (newest first).
+const LIBRARY_MAX = 5000;
+const libraryItem = (j) => ({
+  id: j.id, finished: j.finished || Date.now(), url: j.url, kind: j.kind, mode: j.mode, height: j.height ?? null,
+  title: j.title, thumbnail: j.thumbnail || null, site: j.site || null, uploader: j.uploader || null,
+  duration: j.duration || null, count: j.count || null, file: j.file || null, files: j.files || null,
+  size: j.size || null, specs: j.specs || null,
+});
+function addToLibrary(j) {
+  const items = [libraryItem(j), ...(library.get('items') || []).filter((x) => x.id !== j.id)].slice(0, LIBRARY_MAX);
+  library.set({ items });
+  if (win && !win.isDestroyed()) win.webContents.send('library-add', { ...items[0], exists: true });
 }
 
 function update(id, patch) {
@@ -61,10 +67,19 @@ function update(id, patch) {
   if (['done', 'error', 'canceled'].includes(patch.status)) {
     running.delete(id);
     j.finished = Date.now();
-    persistHistory();
+    if (patch.status === 'done') addToLibrary(j);
     pump();
   }
   sendJob(j);
+}
+
+// Spec lookups each start a yt-dlp process; run at most three at once.
+let specSlots = 3;
+const specWaiters = [];
+async function withSpecSlot(fn) {
+  if (specSlots === 0) await new Promise((r) => specWaiters.push(r));
+  specSlots--;
+  try { return await fn(); } finally { specSlots++; const next = specWaiters.shift(); if (next) next(); }
 }
 
 // Start queued jobs up to the concurrency limit.
@@ -112,8 +127,19 @@ app.whenReady().then(async () => {
     metadata: true, thumbnail: true, subtitles: false, watchClipboard: true,
     lastEngineUpdate: 0,
   });
-  history = new Store(path.join(data, 'history.json'), { jobs: [] });
-  for (const j of history.get('jobs') || []) jobs.set(j.id, j);
+  library = new Store(path.join(data, 'library.json'), { items: [] });
+  // One-time move: finished downloads from 0.1.x's list become History entries.
+  const oldList = path.join(data, 'history.json');
+  if (fs.existsSync(oldList)) {
+    try {
+      const old = JSON.parse(fs.readFileSync(oldList, 'utf8')).jobs || [];
+      const known = new Set(library.get('items').map((x) => x.id));
+      const moved = old.filter((j) => j.status === 'done' && !known.has(j.id)).map(libraryItem);
+      library.set({ items: [...library.get('items'), ...moved].sort((a, b) => b.finished - a.finished) });
+      library.flush();
+      fs.renameSync(oldList, `${oldList}.moved`);
+    } catch {}
+  }
 
   createWindow();
 
@@ -137,7 +163,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   for (const r of running.values()) r.cancel();
   settings && settings.flush();
-  history && history.flush();
+  library && library.flush();
   app.quit();
 });
 
@@ -160,7 +186,7 @@ ipcMain.handle('update-download', () => {
 });
 ipcMain.handle('update-install', () => {
   for (const r of running.values()) r.cancel();
-  settings.flush(); history.flush();
+  settings.flush(); library.flush();
   setImmediate(() => autoUpdater.quitAndInstall(true, true));
 });
 
@@ -198,15 +224,32 @@ ipcMain.handle('retry', (_e, id) => {
   pump();
 });
 
+// Removing from Downloads only tidies this session's list; History keeps the entry.
 ipcMain.handle('remove', (_e, id) => {
   if (running.has(id)) return;
   jobs.delete(id);
-  persistHistory();
 });
 
 ipcMain.handle('clear-finished', () => {
   for (const [id, j] of jobs) if (['done', 'error', 'canceled'].includes(j.status)) jobs.delete(id);
-  persistHistory();
+});
+
+ipcMain.handle('specs', async (_e, key, mode, height) => {
+  try { return await withSpecSlot(() => engine.specs(key, mode, height)); } catch { return null; }
+});
+
+ipcMain.handle('library', () => (library.get('items') || []).map((x) => ({
+  ...x, exists: !!(x.file && fs.existsSync(x.file)) || !!(x.files && x.files.some((f) => fs.existsSync(f))),
+})));
+ipcMain.handle('library-remove', (_e, id) => { library.set({ items: library.get('items').filter((x) => x.id !== id) }); });
+ipcMain.handle('library-clear', async () => {
+  const r = await dialog.showMessageBox(win, {
+    type: 'question', buttons: ['Clear history', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true,
+    title: 'Clear history', message: 'Clear your download history?', detail: 'The list is emptied. Your downloaded files stay where they are.',
+  });
+  if (r.response !== 0) return false;
+  library.set({ items: [] });
+  return true;
 });
 
 ipcMain.handle('open-file', async (_e, p) => (p && fs.existsSync(p) ? (await shell.openPath(p)) || true : false));
