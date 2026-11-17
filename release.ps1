@@ -9,6 +9,12 @@ $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
 if ($Publish) {
   $env:GH_TOKEN = (gh auth token)
   if (-not $env:GH_TOKEN) { throw 'Not signed in to GitHub. Run: gh auth login' }
+  if (git status --porcelain) { throw 'Commit your changes first, so the release matches the code.' }
+  # GitHub only publishes a release for a tag that already exists on the remote.
+  $tag = "v$version"
+  if (-not (git tag --list $tag)) { git tag $tag }
+  git push origin HEAD $tag
+  if ($LASTEXITCODE) { throw 'Could not push to GitHub.' }
   npx electron-builder --win nsis --publish always
 } else {
   npx electron-builder --win nsis --publish never
