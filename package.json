@@ -1,7 +1,7 @@
 {
   "name": "snag",
   "productName": "Snag",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Desktop video downloader for YouTube, TikTok, Instagram, X and 1800+ sites (powered by yt-dlp)",
   "author": "Snag",
   "main": "src/main.js",
