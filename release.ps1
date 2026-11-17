@@ -31,7 +31,7 @@ if ($Publish) {
   if ($LASTEXITCODE) { throw 'Could not push to GitHub.' }
   if (-not $Notes) { $Notes = "Snag $version. Download Snag-Setup-$version.exe and run it. Installed copies update themselves." }
   # latest.yml + blockmap are what installed copies read to find and download the update.
-  gh release create $tag $exe "$exe.blockmap" 'dist\latest.yml' $zip --title "Snag $version" --notes $Notes --verify-tag
+  gh release create $tag $exe "$exe.blockmap" 'dist\latest.yml' $zip --title "Snag - MP3/MP4 Downloader $version" --notes $Notes --verify-tag
   if ($LASTEXITCODE) { throw 'Could not create the GitHub release.' }
   Write-Host "Published $tag"
 }
