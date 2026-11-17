@@ -9,9 +9,12 @@
 </head>
 <body>
   <header class="bar">
-    <div class="brand"><img class="mark" src="logo.svg" alt="" width="20" height="20">Snag</div>
+   <div class="bar-inner">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 256 256" aria-hidden="true"><rect class="tile" width="256" height="256" rx="56"/><path class="sheet" d="M68 68h120v74l-46 46H68z"/><path class="arrow" d="M128 92v54m-23-23 23 23 23-23"/></svg>Snag
+    </div>
     <div class="engine-pill" id="enginePill" hidden></div>
-    <nav class="bar-actions">
+    <nav class="bar-actions" aria-label="App">
       <button class="icon-btn" id="openFolder" title="Open downloads folder" aria-label="Open downloads folder">
         <svg viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l2 2h8.8A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>
       </button>
@@ -19,6 +22,7 @@
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
       </button>
     </nav>
+   </div>
   </header>
 
   <main class="wrap">
@@ -26,11 +30,11 @@
     <form class="grab" id="grab" autocomplete="off">
       <label class="sr" for="url">Video link</label>
       <input id="url" type="text" inputmode="url" placeholder="Paste a video link" spellcheck="false">
-      <button type="submit" class="btn primary" id="grabBtn">Get video</button>
+      <button type="submit" class="btn quiet" id="grabBtn">Get video</button>
     </form>
-    <p class="sites">YouTube, TikTok, Instagram, X, Facebook, Reddit, Vimeo, Twitch and 1,800 more sites. Paste several links at once to queue them all.</p>
+    <p class="hint" id="hint">YouTube, TikTok, Instagram, X, Facebook, Reddit, Vimeo, Twitch and 1,800 more sites. Paste several links at once to queue them all.</p>
 
-    <section class="preview" id="preview" hidden aria-live="polite"></section>
+    <section class="preview" id="preview" hidden></section>
 
     <section class="downloads">
       <div class="dl-head">
@@ -44,12 +48,19 @@
 
       <div id="paneDownloads" role="tabpanel" aria-labelledby="tabDownloads">
         <ul class="jobs" id="jobs"></ul>
-        <p class="empty" id="empty">Downloads you start show up here.</p>
+        <div class="empty" id="empty">
+          <h3 id="emptyTitle">Nothing downloading yet</h3>
+          <p id="emptyText">Copy a video link in your browser and come back: Snag fills it in. You can also press <kbd>Ctrl</kbd>+<kbd>V</kbd> anywhere in this window, or drag a link onto it.</p>
+        </div>
       </div>
 
       <div id="paneHistory" role="tabpanel" aria-labelledby="tabHistory" hidden>
-        <label class="sr" for="histSearch">Search history</label>
-        <input class="search" id="histSearch" type="search" placeholder="Search by title, channel or site" autocomplete="off" spellcheck="false">
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+          <label class="sr" for="histSearch">Search history</label>
+          <input class="search" id="histSearch" type="search" placeholder="Search by title, channel or site" autocomplete="off" spellcheck="false">
+          <button class="icon-btn" id="histClear" type="button" aria-label="Clear search" title="Clear search" hidden><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
+        </div>
         <div id="histList"></div>
         <button class="btn more" id="histMore" hidden>Show more</button>
         <p class="empty" id="histEmpty" hidden></p>
@@ -58,9 +69,9 @@
   </main>
 
   <div class="scrim" id="scrim" hidden></div>
-  <aside class="panel" id="settings" aria-label="Settings" hidden>
+  <aside class="panel" id="settings" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
     <div class="panel-head">
-      <h2>Settings</h2>
+      <h2 id="settingsTitle">Settings</h2>
       <button class="icon-btn" id="closeSettings" aria-label="Close settings" title="Close">
         <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
@@ -82,7 +93,7 @@
       <div class="path-row"><code id="folderPath"></code><button class="btn" id="chooseFolder">Change</button></div>
     </div>
 
-    <div class="field">
+    <div class="field" id="fieldCookies">
       <label class="label" for="cookies">Use browser sign-in</label>
       <select id="cookies">
         <option value="none">Off</option>

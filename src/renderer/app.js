@@ -7,8 +7,8 @@ const state = { settings: {}, engine: {}, jobs: new Map(), preview: null, probeT
 const MODES = [
   { id: 'video', label: 'MP4', hint: 'Best quality' },
   { id: 'h264', label: 'MP4 H.264', hint: 'Plays on any device' },
-  { id: 'mp3', label: 'MP3', hint: 'Audio only' },
-  { id: 'm4a', label: 'M4A', hint: 'Audio only' },
+  { id: 'mp3', label: 'MP3', hint: 'Audio, plays anywhere' },
+  { id: 'm4a', label: 'M4A', hint: 'Audio, original quality' },
 ];
 const MODE_NAME = { video: 'MP4', h264: 'MP4 H.264', mp3: 'MP3', m4a: 'M4A' };
 const SITE_NAME = { Youtube: 'YouTube', YoutubeTab: 'YouTube', TikTok: 'TikTok', Instagram: 'Instagram', Twitter: 'X', Facebook: 'Facebook', Reddit: 'Reddit', Vimeo: 'Vimeo', Twitch: 'Twitch', TwitchVod: 'Twitch', TwitchClips: 'Twitch', Dailymotion: 'Dailymotion', Soundcloud: 'SoundCloud', Generic: 'Web page' };
@@ -82,16 +82,69 @@ const ICON = {
   retry: '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/></svg>',
   trash: '<svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>',
   link: '<svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>',
+  more: '<svg viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/></svg>',
+  again: '<svg viewBox="0 0 24 24"><path d="M12 4v11m-4.5-4.5L12 15l4.5-4.5"/><path d="M5 19h14"/></svg>',
+  check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  film: '<svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="1.5"/><path d="M10 9.5v5l4.2-2.5z"/></svg>',
 };
 
-let toastTimer;
-function toast(msg) {
+// Toast. With an action (Undo), it stays 5 s and the action runs only if clicked.
+let toastTimer, toastDone = null;
+function toast(msg, { action, onAction, onExpire, ms } = {}) {
   const t = $('#toast');
-  t.textContent = msg; t.hidden = false;
+  if (toastDone) { const f = toastDone; toastDone = null; f(); } // settle a previous undo-able toast
+  t.replaceChildren(Object.assign(document.createElement('span'), { textContent: msg }));
+  if (action) {
+    const b = Object.assign(document.createElement('button'), { type: 'button', textContent: action });
+    b.onclick = () => { toastDone = null; clearTimeout(toastTimer); t.hidden = true; onAction && onAction(); };
+    t.append(b);
+    toastDone = onExpire || null;
+  }
+  t.hidden = false;
   t.style.animation = 'none'; void t.offsetWidth; t.style.animation = '';
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+  toastTimer = setTimeout(() => { t.hidden = true; if (toastDone) { const f = toastDone; toastDone = null; f(); } }, ms || (action ? 5000 : 2800));
 }
+
+// Thumbnails: vertical videos are letterboxed whole instead of cropped into 16:9.
+function fitThumb(img) {
+  const check = () => { if (img.naturalHeight > img.naturalWidth * 1.05) img.classList.add('portrait'); };
+  if (img.complete && img.naturalWidth) check(); else img.addEventListener('load', check, { once: true });
+}
+
+// Overflow menu ("More actions"). Items are buttons carrying data-act, so the list's click handler runs them.
+let openMenuEl = null;
+function closeMenu(focusBack = false) {
+  if (!openMenuEl) return;
+  const { menu, button } = openMenuEl;
+  menu.remove();
+  button.setAttribute('aria-expanded', 'false');
+  if (focusBack) button.focus();
+  openMenuEl = null;
+}
+function openMenu(button, items) {
+  if (openMenuEl && openMenuEl.button === button) return closeMenu(true);
+  closeMenu();
+  const menu = document.createElement('ul');
+  menu.className = 'menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = items.map((i) => `<li role="none"><button type="button" role="menuitem" data-act="${i.act}"${i.danger ? ' class="danger"' : ''}>${ICON[i.icon] || ''}<span>${esc(i.label)}</span></button></li>`).join('');
+  button.parentElement.append(menu);
+  button.setAttribute('aria-expanded', 'true');
+  openMenuEl = { menu, button };
+  const buttons = [...menu.querySelectorAll('button')];
+  buttons[0].focus();
+  menu.addEventListener('keydown', (e) => {
+    const i = buttons.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') { e.preventDefault(); buttons[(i + 1) % buttons.length].focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); buttons[(i - 1 + buttons.length) % buttons.length].focus(); }
+    else if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); closeMenu(true); }
+  });
+}
+document.addEventListener('pointerdown', (e) => { if (openMenuEl && !openMenuEl.menu.contains(e.target) && e.target.closest('[data-act="more"]') !== openMenuEl.button) closeMenu(); });
+
+const SIGN_IN = /browser sign-in/i;
+const signInButton = (cls = 'btn') => `<button type="button" class="${cls}" data-act="signin">Set up browser sign-in</button>`;
 
 // ---------- link input ----------
 const input = $('#url');
@@ -99,7 +152,7 @@ const input = $('#url');
 function handleText(text, { auto = false } = {}) {
   const urls = urlsIn(text);
   if (!urls.length) {
-    if (!auto) showNotice('That does not look like a link. Copy the address of the video page and paste it here.', text);
+    if (!auto) showNotice('That does not look like a link. Copy the address of the video page and paste it here.');
     return false;
   }
   if (urls.length > 1) {
@@ -122,7 +175,12 @@ input.addEventListener('paste', (e) => {
 
 // Paste anywhere in the window goes to the link field.
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$('#settings').hidden) closeSettings();
+  if (e.key === 'Escape') {
+    if (openMenuEl) closeMenu(true);
+    else if (!$('#settings').hidden) closeSettings();
+    else if (!preview.hidden) { ++state.probeToken; hidePreview(); input.value = ''; input.focus(); }
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && document.activeElement !== input && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
     input.focus();
   }
@@ -152,10 +210,12 @@ window.addEventListener('focus', async () => {
 const preview = $('#preview');
 function hidePreview() { preview.hidden = true; preview.innerHTML = ''; state.preview = null; }
 
-function showNotice(msg, sub, retry) {
+function showNotice(msg, retry) {
   preview.hidden = false;
-  preview.innerHTML = `<div class="notice"><div><p>${esc(msg)}</p>${sub ? `<p class="sub">${esc(sub)}</p>` : ''}</div>${retry ? '<button class="btn" data-act="retry-probe">Try again</button>' : ''}</div>`;
+  preview.innerHTML = `<div class="notice" role="alert"><p>${esc(msg)}</p><div class="actions">${SIGN_IN.test(msg) ? signInButton() : ''}${retry ? '<button class="btn" data-act="retry-probe">Try again</button>' : ''}</div></div>`;
   if (retry) preview.querySelector('[data-act="retry-probe"]').onclick = () => probe(retry);
+  const s = preview.querySelector('[data-act="signin"]');
+  if (s) s.onclick = () => openSettings('cookies');
 }
 
 async function probe(url) {
@@ -166,14 +226,23 @@ async function probe(url) {
   preview.querySelectorAll('.line').forEach((l, i) => { l.style.width = i ? '40%' : '80%'; });
   const r = await window.snag.probe(url);
   if (token !== state.probeToken) return;
-  if (r.error) return showNotice(r.error, url, url);
+  if (r.error) return showNotice(r.error, url);
   state.preview = r;
-  state.height = null;
+  // Keep the last quality picked, if this video has it; otherwise Best.
+  const want = Number(state.settings.height) || null;
+  state.height = want && (r.kind === 'playlist' || (r.qualities || []).some((q) => q.height === want)) ? want : null;
   if (!r.hasVideo && (state.mode === 'video' || state.mode === 'h264')) state.mode = 'mp3';
-  renderPreview();
+  renderPreview(true);
 }
 
-function renderPreview() {
+function setMode(mode) {
+  state.mode = mode;
+  save({ mode });
+  renderPreview();
+  preview.querySelector(`[data-mode="${mode}"]`)?.focus();
+}
+
+function renderPreview(first = false) {
   const p = state.preview;
   if (!p) return;
   const isAudio = state.mode === 'mp3' || state.mode === 'm4a';
@@ -208,21 +277,17 @@ function renderPreview() {
         ${quality}
         <button class="btn primary" id="startDl">${p.kind === 'playlist' ? `Download ${p.count || 'all'}` : 'Download'}</button>
       </div>
-      ${p.specsKey ? '<dl class="specs" id="specs" aria-live="polite"></dl>' : ''}
+      ${p.specsKey ? '<dl class="specs" id="specs" aria-live="polite"></dl><p class="spec-note" id="specNote" hidden></p>' : ''}
     </div>
   </div>`;
 
   const img = preview.querySelector('img.thumb');
-  if (img) img.onerror = () => { img.replaceWith(Object.assign(document.createElement('div'), { className: 'thumb' })); };
-  preview.querySelectorAll('.mode').forEach((b) => b.onclick = () => {
-    state.mode = b.dataset.mode;
-    window.snag.setSettings({ mode: state.mode });
-    renderPreview();
-  });
+  if (img) { img.onerror = () => { img.replaceWith(Object.assign(document.createElement('div'), { className: 'thumb' })); }; fitThumb(img); }
+  preview.querySelectorAll('.mode').forEach((b) => b.onclick = () => setMode(b.dataset.mode));
   const q = $('#quality');
-  if (q) q.onchange = () => { state.height = q.value ? Number(q.value) : null; renderSpecs(); };
+  if (q) q.onchange = () => { state.height = q.value ? Number(q.value) : null; save({ height: state.height }); renderSpecs(); };
   $('#startDl').onclick = startDownload;
-  $('#startDl').focus();
+  if (first) $('#startDl').focus(); // only when the video first appears, never while choosing
   renderSpecs();
 }
 
@@ -251,6 +316,21 @@ async function renderSpecs() {
   }
   box.classList.remove('wait');
   box.innerHTML = s ? specsHtml(s) : '<div><dt>Specs</dt><dd class="sub">This site does not list stream details. They show on the file once it downloads.</dd></div>';
+  // Not every player opens VP9/AV1/HEVC; say so, with the one-click way out.
+  const note = $('#specNote');
+  const codec = s && s.video ? codecName(s.video.codec) : '';
+  if (note) {
+    note.hidden = !(state.mode === 'video' && codec && codec !== 'H.264');
+    if (!note.hidden) {
+      const where = {
+        VP9: 'VP9 plays in browsers and VLC. For TVs, phones and video editors, choose',
+        AV1: 'AV1 plays in browsers and VLC on newer PCs. For TVs, older phones and video editors, choose',
+        HEVC: 'HEVC plays on phones and in VLC, but Windows may need the HEVC extension. For the widest support, choose',
+      }[codec] || `${codec} may not play everywhere. For the widest support, choose`;
+      note.innerHTML = `${esc(where)} <button type="button" class="link-btn inline" id="toH264">MP4 H.264</button>.`;
+      $('#toH264').onclick = () => setMode('h264');
+    }
+  }
   if (!audioMode) for (const q of p.qualities || []) fetchSpecs(p.specsKey, state.mode, q.height); // warm the rest quietly
 }
 
@@ -310,6 +390,15 @@ function updateCounts() {
   const active = all.filter((j) => j.status === 'downloading' || j.status === 'processing' || j.status === 'queued').length;
   $('#count').textContent = all.length ? (active ? `${active} active` : `${all.length}`) : '';
   $('#empty').hidden = all.length > 0;
+  if (!all.length) {
+    const has = typeof hist !== 'undefined' && hist.items.length > 0;
+    $('#emptyTitle').textContent = has ? 'Nothing downloading' : 'Nothing downloading yet';
+    $('#emptyText').innerHTML = has
+      ? 'Everything you have saved is in <button type="button" class="link-btn inline" id="toHistory">History</button>. Paste a new link above to start another.'
+      : `${state.settings.watchClipboard !== false ? 'Copy a video link in your browser and come back: Snag fills it in. ' : ''}You can also press <kbd>Ctrl</kbd>+<kbd>V</kbd> anywhere in this window, or drag a link onto it.`;
+    const h = $('#toHistory');
+    if (h) h.onclick = () => showTab('history', true);
+  }
   $('#clearDone').hidden = state.tab !== 'downloads' || !all.some((j) => ['done', 'error', 'canceled'].includes(j.status));
   document.title = active ? `Snag (${active})` : 'Snag';
 }
@@ -320,7 +409,7 @@ function rowFor(j) {
   li = document.createElement('li');
   li.className = 'job';
   li.dataset.id = j.id;
-  li.innerHTML = '<div class="fill"></div><div class="jthumb"></div><div class="jbody"><div class="jtitle"></div><div class="jmeta"></div></div><div class="counter"></div><div class="jactions"></div>';
+  li.innerHTML = `<div class="fill" role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100"></div><div class="jthumb">${ICON.film}</div><div class="jbody"><div class="jtitle"></div><div class="jmeta"></div></div><div class="counter"></div><div class="jactions"></div>`;
   rows.set(j.id, li);
   // newest on top
   const ordered = [...state.jobs.values()].sort((a, b) => b.created - a.created);
@@ -342,7 +431,8 @@ function renderJob(id) {
   if (j.thumbnail && slot.dataset.src !== j.thumbnail) {
     slot.dataset.src = j.thumbnail;
     const img = Object.assign(new Image(), { alt: '', referrerPolicy: 'no-referrer', src: j.thumbnail });
-    img.onerror = () => img.remove();
+    img.onerror = () => { img.remove(); slot.innerHTML = ICON.film; };
+    fitThumb(img);
     slot.replaceChildren(img);
   }
 
@@ -351,44 +441,71 @@ function renderJob(id) {
   if (tEl.textContent !== title) { tEl.textContent = title; tEl.title = title; }
 
   const pct = Math.max(0, Math.min(1, j.percent || 0));
-  row.querySelector('.fill').style.setProperty('--p', pct.toFixed(4));
+  const fill = row.querySelector('.fill');
+  fill.style.setProperty('--p', pct.toFixed(4));
+  fill.setAttribute('aria-valuenow', String(Math.floor(pct * 100)));
 
+  // Meta: specs read darker than context so the line splits into two groups at a glance.
   const meta = [];
+  const add = (t, cls = '') => t && meta.push(`<span${cls ? ` class="${cls}"` : ''}>${esc(t)}</span>`);
   const fmt = `${MODE_NAME[j.mode] || ''}${(j.mode === 'video' || j.mode === 'h264') && j.height ? ` ${j.height}p` : ''}`;
   let counter = '';
-  if (j.status === 'queued') meta.push('Waiting', fmt);
+  if (j.status === 'queued') { add('Waiting'); add(fmt); }
   else if (j.status === 'downloading') {
     counter = `${Math.floor(pct * 100)}%`;
-    if (j.kind === 'playlist' && j.item) meta.push(`Video ${j.item} of ${j.count || '?'}`);
-    meta.push(j.stage === 'Starting' ? 'Starting' : fmt);
-    if (j.total) meta.push(`${bytes(j.downloaded || 0)} of ${bytes(j.total)}`);
-    if (j.speed) meta.push(`${bytes(j.speed)}/s`);
-    if (j.eta != null) meta.push(left(j.eta));
+    if (j.kind === 'playlist' && j.item) add(`Video ${j.item} of ${j.count || '?'}`);
+    add(j.stage === 'Starting' ? 'Starting' : fmt);
+    if (j.total) add(`${bytes(j.downloaded || 0)} of ${bytes(j.total)}`, 'spec');
+    if (j.speed) add(`${bytes(j.speed)}/s`, 'spec');
+    if (j.eta != null) add(left(j.eta));
   } else if (j.status === 'processing') {
     counter = `${Math.floor(pct * 100)}%`;
-    if (j.kind === 'playlist' && j.item) meta.push(`Video ${j.item} of ${j.count || '?'}`);
-    meta.push(j.stage || 'Processing');
+    if (j.kind === 'playlist' && j.item) add(`Video ${j.item} of ${j.count || '?'}`);
+    add(j.stage || 'Processing');
   } else if (j.status === 'done') {
-    meta.push('<span class="okay">Done</span>');
+    add('Done', 'okay');
     const real = fileSpecs(j.specs, j.mode);
-    meta.push(...(real.length ? real : [fmt]));
-    if (j.kind === 'playlist' && j.files) meta.push(`${j.files.length} files`);
-    if (j.size) meta.push(bytes(j.size));
-  } else if (j.status === 'error') meta.push(`<span class="err">${esc(j.error || 'Download failed.')}</span>`);
-  else if (j.status === 'canceled') meta.push('Canceled');
+    (real.length ? real : [fmt]).forEach((t) => add(t, 'spec'));
+    if (j.kind === 'playlist' && j.files) add(`${j.files.length} files`, 'spec');
+    if (j.size) add(bytes(j.size), 'spec');
+  } else if (j.status === 'error') {
+    meta.push(`<span class="err">${esc(j.error || 'Download failed.')}</span>`);
+    if (SIGN_IN.test(j.error || '')) meta.push(signInButton('link-btn inline err-act'));
+  } else if (j.status === 'canceled') add('Canceled');
 
-  row.querySelector('.jmeta').innerHTML = meta.filter(Boolean).map((m) => (m.startsWith('<span') ? m : `<span>${esc(m)}</span>`)).join('');
+  row.querySelector('.jmeta').innerHTML = meta.join('');
   const c = row.querySelector('.counter');
-  if (c.textContent !== counter) c.textContent = counter;
+  const justDone = statusChanged && j.status === 'done' && ['downloading', 'processing'].includes(row.dataset.was);
+  if (justDone) {
+    // The finish moment: the percentage resolves into a verified "Saved", then gets out of the way.
+    c.className = 'counter saved';
+    c.innerHTML = `${ICON.check}<span>Saved</span>`;
+    setTimeout(() => { if (c.classList.contains('saved')) { c.className = 'counter'; c.textContent = ''; } }, 2700);
+  } else if (!c.classList.contains('saved') && c.textContent !== counter) c.textContent = counter;
+  row.dataset.was = j.status;
 
-  if (statusChanged) {
+  if (statusChanged || row.dataset.confirm !== (row.confirming ? '1' : '')) {
+    row.dataset.confirm = row.confirming ? '1' : '';
     const btn = (act, icon, label) => `<button class="icon-btn" data-act="${act}" title="${label}" aria-label="${label}">${ICON[icon]}</button>`;
+    const more = '<button class="icon-btn" data-act="more" title="More actions" aria-label="More actions" aria-haspopup="menu" aria-expanded="false">' + ICON.more + '</button>';
     let a = '';
-    if (j.status === 'queued' || j.status === 'downloading' || j.status === 'processing') a = btn('cancel', 'x', 'Cancel download');
-    else if (j.status === 'done') a = (j.kind === 'playlist' ? '' : btn('play', 'play', 'Play')) + btn('show', 'folder', 'Show in folder') + btn('remove', 'trash', 'Remove from list');
-    else a = btn('retry', 'retry', 'Try again') + btn('source', 'link', 'Open the page') + btn('remove', 'trash', 'Remove from list');
+    if (['queued', 'downloading', 'processing'].includes(j.status)) {
+      a = row.confirming ? '<button class="confirm-stop" data-act="cancel-confirm">Stop download</button>' : btn('cancel', 'x', 'Cancel download');
+    } else if (j.status === 'done') a = (j.kind === 'playlist' ? '' : btn('play', 'play', 'Play')) + btn('show', 'folder', 'Show in folder') + more;
+    else a = btn('retry', 'retry', 'Try again') + more;
     row.querySelector('.jactions').innerHTML = a;
   }
+}
+
+// Removing from Downloads waits 5 s so Undo can bring the row back.
+function removeJobWithUndo(j) {
+  state.jobs.delete(j.id);
+  queueRender(j.id);
+  toast('Removed from Downloads', {
+    action: 'Undo',
+    onAction: () => { state.jobs.set(j.id, j); const r = rows.get(j.id); if (r) r.dataset.status = ''; queueRender(j.id); },
+    onExpire: () => window.snag.remove(j.id),
+  });
 }
 
 list.addEventListener('click', async (e) => {
@@ -396,12 +513,25 @@ list.addEventListener('click', async (e) => {
   if (!li) return;
   const j = state.jobs.get(li.dataset.id);
   if (!j) return;
-  const act = e.target.closest('[data-act]')?.dataset.act || (e.target.closest('.jthumb') && j.status === 'done' ? (j.kind === 'playlist' ? 'show' : 'play') : null);
+  const btnEl = e.target.closest('[data-act]');
+  const act = btnEl?.dataset.act || (e.target.closest('.jthumb') && j.status === 'done' ? (j.kind === 'playlist' ? 'show' : 'play') : null);
   if (!act) return;
-  if (act === 'cancel') window.snag.cancel(j.id);
+  if (act !== 'more') closeMenu();
+  if (act === 'cancel') {
+    // A long download is one click from being thrown away: past a quarter, ask once.
+    if ((j.percent || 0) > 0.25) {
+      li.confirming = true; queueRender(j.id);
+      setTimeout(() => { li.confirming = false; queueRender(j.id); }, 3500);
+      requestAnimationFrame(() => requestAnimationFrame(() => li.querySelector('[data-act="cancel-confirm"]')?.focus()));
+    } else window.snag.cancel(j.id);
+  } else if (act === 'cancel-confirm') { li.confirming = false; window.snag.cancel(j.id); }
+  else if (act === 'more') {
+    openMenu(btnEl, [{ act: 'source', icon: 'link', label: 'Open the page' }, { act: 'remove', icon: 'trash', label: 'Remove from list', danger: true }]);
+  }
   else if (act === 'retry') window.snag.retry(j.id);
+  else if (act === 'signin') openSettings('cookies');
   else if (act === 'source') window.snag.openExternal(j.url);
-  else if (act === 'remove') { await window.snag.remove(j.id); state.jobs.delete(j.id); queueRender(j.id); }
+  else if (act === 'remove') removeJobWithUndo(j);
   else if (act === 'play' || act === 'show') {
     const ok = act === 'play' ? await window.snag.openFile(j.file) : await window.snag.showFile(j.file || (j.files && j.files[0]));
     if (!ok) toast('That file was moved or deleted.');
@@ -463,6 +593,8 @@ function dayLabel(ts) {
 function renderHistoryChrome() {
   $('#histCount').textContent = hist.loaded && hist.items.length ? String(hist.items.length) : '';
   $('#clearHistory').hidden = state.tab !== 'history' || !hist.items.length;
+  // The supported-sites line is for first-timers; it retires once something has been saved.
+  $('#hint').hidden = hist.items.length > 0;
 }
 
 function renderHistory() {
@@ -477,49 +609,85 @@ function renderHistory() {
   $('#histMore').textContent = `Show more (${match.length - shown.length} left)`;
 
   const btn = (act, icon, label) => `<button class="icon-btn" data-act="${act}" title="${label}" aria-label="${label}">${ICON[icon]}</button>`;
+  const more = `<button class="icon-btn" data-act="more" title="More actions" aria-label="More actions" aria-haspopup="menu" aria-expanded="false">${ICON.more}</button>`;
   let html = '', day = '';
   for (const x of shown) {
     const label = dayLabel(x.finished);
     if (label !== day) { html += `${day ? '</ul>' : ''}<h3 class="day">${esc(label)}</h3><ul class="jobs">`; day = label; }
     const fmt = `${MODE_NAME[x.mode] || ''}${(x.mode === 'video' || x.mode === 'h264') && x.height ? ` ${x.height}p` : ''}`;
     const real = fileSpecs(x.specs, x.mode);
-    const meta = [new Date(x.finished).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }), ...(real.length ? real : [fmt]), x.size ? bytes(x.size) : '', x.uploader || siteName(x.site)];
-    html += `<li class="job" data-id="${esc(x.id)}" data-status="done">
-      <div class="jthumb">${x.thumbnail ? `<img alt="" referrerpolicy="no-referrer" src="${esc(x.thumbnail)}">` : ''}</div>
-      <div class="jbody"><div class="jtitle" title="${esc(x.title)}">${esc(x.title)}</div>
-        <div class="jmeta">${x.exists ? '' : '<span class="missing">File moved or deleted</span>'}${meta.filter(Boolean).map((m) => `<span>${esc(m)}</span>`).join('')}</div></div>
-      <div class="counter"></div>
-      <div class="jactions">${x.exists && x.kind !== 'playlist' ? btn('play', 'play', 'Play') : ''}${x.exists ? btn('show', 'folder', 'Show in folder') : ''}${btn('again', 'retry', 'Download again')}${btn('source', 'link', 'Open the page')}${btn('forget', 'trash', 'Remove from history')}</div>
+    const span = (t, cls = '') => (t ? `<span${cls ? ` class="${cls}"` : ''}>${esc(t)}</span>` : '');
+    const meta = (x.exists ? '' : span('File moved or deleted', 'missing'))
+      + span(new Date(x.finished).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))
+      + (real.length ? real : [fmt]).map((t) => span(t, 'spec')).join('')
+      + span(x.size ? bytes(x.size) : '', 'spec')
+      + span(x.uploader || siteName(x.site));
+    const open = x.exists ? (x.kind === 'playlist' ? 'show' : 'play') : '';
+    html += `<li class="job${open ? ' openable' : ' gone'}" data-id="${esc(x.id)}" data-status="done"${open ? ` tabindex="0" aria-label="${open === 'play' ? 'Play' : 'Show'} ${esc(x.title)}"` : ''}>
+      <div class="jthumb">${x.thumbnail ? `<img alt="" referrerpolicy="no-referrer" src="${esc(x.thumbnail)}">` : ICON.film}</div>
+      <div class="jbody"><div class="jtitle" title="${esc(x.title)}">${esc(x.title)}</div><div class="jmeta">${meta}</div></div>
+      <div class="jactions">${x.exists && x.kind !== 'playlist' ? btn('play', 'play', 'Play') : ''}${x.exists ? btn('show', 'folder', 'Show in folder') : btn('again', 'again', 'Download again')}${more}</div>
     </li>`;
   }
   histList.innerHTML = html + (day ? '</ul>' : '');
-  histList.querySelectorAll('.jthumb img').forEach((img) => { img.onerror = () => img.remove(); });
+  histList.querySelectorAll('.jthumb img').forEach((img) => {
+    img.onerror = () => { const s = img.parentElement; img.remove(); s.innerHTML = ICON.film; };
+    fitThumb(img);
+  });
 }
 
-histList.addEventListener('click', async (e) => {
-  const li = e.target.closest('.job');
-  const x = li && hist.items.find((i) => i.id === li.dataset.id);
-  if (!x) return;
-  const act = e.target.closest('[data-act]')?.dataset.act || (e.target.closest('.jthumb') && x.exists ? (x.kind === 'playlist' ? 'show' : 'play') : null);
+function forgetWithUndo(x) {
+  const at = hist.items.findIndex((i) => i.id === x.id);
+  hist.items = hist.items.filter((i) => i.id !== x.id);
+  renderHistory();
+  toast('Removed from History', {
+    action: 'Undo',
+    onAction: () => { hist.items.splice(Math.max(0, at), 0, x); renderHistory(); },
+    onExpire: () => window.snag.libraryRemove(x.id),
+  });
+}
+
+async function historyAct(x, act, btnEl) {
+  if (act !== 'more') closeMenu();
   if (act === 'play' || act === 'show') {
     const ok = act === 'play' ? await window.snag.openFile(x.file) : await window.snag.showFile(x.file || (x.files && x.files[0]));
     if (!ok) { toast('That file was moved or deleted.'); x.exists = false; renderHistory(); }
+  } else if (act === 'more') {
+    openMenu(btnEl, [
+      ...(x.exists ? [{ act: 'again', icon: 'again', label: 'Download again' }] : []),
+      { act: 'source', icon: 'link', label: 'Open the page' },
+      { act: 'forget', icon: 'trash', label: 'Remove from History', danger: true },
+    ]);
   } else if (act === 'again') {
     await window.snag.enqueue({ url: x.url, kind: x.kind, mode: x.mode, height: x.height, title: x.title, thumbnail: x.thumbnail, site: x.site, uploader: x.uploader, duration: x.duration, count: x.count });
-    toast('Added to downloads');
+    toast('Added to Downloads');
   } else if (act === 'source') window.snag.openExternal(x.url);
-  else if (act === 'forget') {
-    await window.snag.libraryRemove(x.id);
-    hist.items = hist.items.filter((i) => i.id !== x.id);
-    renderHistory();
-  }
+  else if (act === 'forget') forgetWithUndo(x);
+}
+
+histList.addEventListener('click', (e) => {
+  const li = e.target.closest('.job');
+  const x = li && hist.items.find((i) => i.id === li.dataset.id);
+  if (!x) return;
+  const btnEl = e.target.closest('[data-act]');
+  if (btnEl) return historyAct(x, btnEl.dataset.act, btnEl);
+  if (e.target.closest('.jactions, .menu')) return;
+  if (li.classList.contains('openable')) historyAct(x, x.kind === 'playlist' ? 'show' : 'play'); // the whole row opens the file
+});
+histList.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || !e.target.matches('.job.openable')) return;
+  const x = hist.items.find((i) => i.id === e.target.dataset.id);
+  if (x) historyAct(x, x.kind === 'playlist' ? 'show' : 'play');
 });
 
 let searchTimer;
 $('#histSearch').addEventListener('input', (e) => {
+  $('#histClear').hidden = !e.target.value;
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => { hist.query = e.target.value; hist.limit = 150; renderHistory(); }, 120);
 });
+$('#histSearch').addEventListener('keydown', (e) => { if (e.key === 'Escape' && e.target.value) { e.stopPropagation(); $('#histClear').click(); } });
+$('#histClear').onclick = () => { const s = $('#histSearch'); s.value = ''; $('#histClear').hidden = true; hist.query = ''; renderHistory(); s.focus(); };
 $('#histMore').onclick = () => { hist.limit += 150; renderHistory(); };
 $('#clearHistory').onclick = async () => {
   if (await window.snag.libraryClear()) { hist.items = []; renderHistory(); toast('History cleared. Your files were not touched.'); }
@@ -563,7 +731,7 @@ function renderSettings() {
   $('#subtitles').checked = !!s.subtitles;
 }
 
-const save = async (patch) => { state.settings = await window.snag.setSettings(patch); renderSettings(); };
+const save = async (patch) => { state.settings = await window.snag.setSettings(patch); renderSettings(); updateCounts(); };
 $('#cookies').onchange = async (e) => {
   if (e.target.value === 'file' && !state.settings.cookieFile) {
     const f = await window.snag.chooseCookieFile();
@@ -581,9 +749,27 @@ $('#updateEngine').onclick = async () => { const r = await window.snag.updateEng
 $('#installFfmpeg').onclick = async () => { const r = await window.snag.installFfmpeg(); toast(r.message); };
 $('#openFolder').onclick = () => window.snag.openFolder();
 
-function openSettings() { $('#settings').hidden = false; $('#scrim').hidden = false; $('#closeSettings').focus(); }
-function closeSettings() { $('#settings').hidden = true; $('#scrim').hidden = true; $('#openSettings').focus(); }
-$('#openSettings').onclick = openSettings;
+// Settings is a modal dialog: everything behind it is inert, so Tab stays inside.
+let settingsReturn = null;
+function openSettings(focusField) {
+  closeMenu();
+  settingsReturn = document.activeElement;
+  $('#settings').hidden = false; $('#scrim').hidden = false;
+  $('.wrap').inert = true; $('.bar-actions').inert = true;
+  if (focusField && $(`#${focusField}`)) {
+    const el = $(`#${focusField}`);
+    const field = el.closest('.field');
+    field.scrollIntoView({ block: 'center' });
+    field.classList.remove('flash'); void field.offsetWidth; field.classList.add('flash');
+    el.focus();
+  } else $('#closeSettings').focus();
+}
+function closeSettings() {
+  $('#settings').hidden = true; $('#scrim').hidden = true;
+  $('.wrap').inert = false; $('.bar-actions').inert = false;
+  (settingsReturn && document.contains(settingsReturn) ? settingsReturn : $('#openSettings')).focus();
+}
+$('#openSettings').onclick = () => openSettings();
 $('#closeSettings').onclick = closeSettings;
 $('#scrim').onclick = closeSettings;
 
@@ -600,12 +786,12 @@ function renderUpdate() {
   let html = '';
   if (u.state === 'available' && updateDismissed !== u.version) {
     html = `<p>Snag ${esc(u.version)} is available. <span class="sub">You have ${esc(u.current)}.</span></p>
-      <button class="link-btn" data-up="later">Later</button><button class="btn primary" data-up="download">Update now</button>`;
+      <button class="link-btn" data-up="later">Later</button><button class="btn" data-up="download">Update now</button>`;
   } else if (u.state === 'downloading') {
     html = `<p>Downloading Snag ${esc(u.version || '')} <span class="sub">${Math.floor((u.percent || 0) * 100)}%</span></p><div class="fill"></div>`;
   } else if (u.state === 'ready') {
     html = `<p>Snag ${esc(u.version)} is ready. <span class="sub">Snag restarts to finish${active ? '; downloads in progress will stop' : ''}.</span></p>
-      <button class="btn primary" data-up="install">Restart now</button>`;
+      <button class="btn" data-up="install">Restart now</button>`;
   } else if (u.state === 'error' && updateAsked) {
     html = `<p class="err">The update did not finish. ${esc((u.error || '').split('\n')[0].slice(0, 140))}</p><button class="btn" data-up="retry">Try again</button>`;
   }
@@ -648,5 +834,8 @@ window.snag.onUpdate((u) => { state.update = u; renderUpdate(); });
   renderSettings();
   renderEngine();
   loadHistory();
+  // The title-bar icons line up with the content column's right edge; account for the scrollbar gutter.
+  const wrap = $('.wrap');
+  document.documentElement.style.setProperty('--gutter', `${wrap.offsetWidth - wrap.clientWidth}px`);
   input.focus();
 })();

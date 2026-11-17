@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, nativeTheme, powerMonitor } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, nativeTheme, powerMonitor, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -95,9 +95,19 @@ function pump() {
   }
 }
 
+// Dev only: SNAG_DISPLAY=secondary opens test windows centered on a non-primary monitor.
+function devPlacement(width, height) {
+  if (app.isPackaged || process.env.SNAG_DISPLAY !== 'secondary') return {};
+  const primary = screen.getPrimaryDisplay();
+  const other = screen.getAllDisplays().find((d) => d.id !== primary.id);
+  if (!other) return {};
+  const a = other.workArea;
+  return { x: Math.round(a.x + (a.width - width) / 2), y: Math.round(a.y + (a.height - height) / 2) };
+}
+
 function createWindow() {
   win = new BrowserWindow({
-    width: 1080, height: 780, minWidth: 760, minHeight: 560,
+    width: 1080, height: 780, minWidth: 760, minHeight: 560, ...devPlacement(1080, 780),
     backgroundColor: theme().color, show: false, title: 'Snag',
     icon: path.join(__dirname, 'renderer', 'icon.ico'),
     titleBarStyle: 'hidden',

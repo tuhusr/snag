@@ -67,7 +67,9 @@ function explain(raw) {
   if (/login required|log in|rate-limit|private|cookies/i.test(m) && /instagram|facebook|tiktok|twitter|x\.com/i.test(m)) return 'This site needs you signed in. Turn on "Use browser sign-in" in Settings and try again.';
   if (/login required|logged.in|requires authentication|members-only|private video|--cookies-from-browser/i.test(m)) return 'This video needs a signed-in account. Turn on "Use browser sign-in" in Settings and try again.';
   if (/could not copy .*cookie|failed to decrypt|cookie database/i.test(m)) return 'Could not read sign-in from that browser. Close the browser fully and try again, or pick Firefox in Settings.';
-  if (/unsupported url/i.test(m)) return 'This link is not a video page Snag can read. Open the video itself and copy its link.';
+  if (/unsupported url/i.test(m)) return 'No video found on this page. Open the video itself and copy its link.';
+  if (/\[generic\]/i.test(m) && /404/.test(m)) return 'This page does not exist (404). Check the link and try again.';
+  if (/\[generic\]/i.test(m) && /no video|unable to extract|no media/i.test(m)) return 'No video found on this page. Open the video itself and copy its link.';
   if (/video unavailable|has been removed|does not exist|404/i.test(m)) return 'The video is unavailable. It may be deleted, private, or blocked in your region.';
   if (/ffmpeg/i.test(m) && /not found|not installed/i.test(m)) return 'FFmpeg is missing, so video and audio cannot be merged. Install it from Settings.';
   if (/geo|not available in your country/i.test(m)) return 'This video is blocked in your region.';
