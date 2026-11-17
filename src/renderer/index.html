@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'">
+  <title>Snag</title>
+  <link rel="stylesheet" href="../../node_modules/@fontsource-variable/inter/opsz.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand"><img class="mark" src="logo.svg" alt="" width="20" height="20">Snag</div>
+    <div class="engine-pill" id="enginePill" hidden></div>
+    <nav class="bar-actions">
+      <button class="icon-btn" id="openFolder" title="Open downloads folder" aria-label="Open downloads folder">
+        <svg viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l2 2h8.8A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>
+      </button>
+      <button class="icon-btn" id="openSettings" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <div class="update" id="update" role="status" hidden></div>
+    <form class="grab" id="grab" autocomplete="off">
+      <label class="sr" for="url">Video link</label>
+      <input id="url" type="text" inputmode="url" placeholder="Paste a video link" spellcheck="false">
+      <button type="submit" class="btn primary" id="grabBtn">Get video</button>
+    </form>
+    <p class="sites">YouTube, TikTok, Instagram, X, Facebook, Reddit, Vimeo, Twitch and 1,800 more sites. Paste several links at once to queue them all.</p>
+
+    <section class="preview" id="preview" hidden aria-live="polite"></section>
+
+    <section class="downloads">
+      <div class="dl-head">
+        <h2>Downloads</h2><span class="count" id="count"></span>
+        <button class="link-btn" id="clearDone" hidden>Clear finished</button>
+      </div>
+      <ul class="jobs" id="jobs"></ul>
+      <p class="empty" id="empty">Downloads you start show up here.</p>
+    </section>
+  </main>
+
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="panel" id="settings" aria-label="Settings" hidden>
+    <div class="panel-head">
+      <h2>Settings</h2>
+      <button class="icon-btn" id="closeSettings" aria-label="Close settings" title="Close">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="field">
+      <span class="label">Save downloads to</span>
+      <div class="path-row"><code id="folderPath"></code><button class="btn" id="chooseFolder">Change</button></div>
+    </div>
+
+    <div class="field">
+      <label class="label" for="cookies">Use browser sign-in</label>
+      <select id="cookies">
+        <option value="none">Off</option>
+        <option value="firefox">Firefox</option>
+        <option value="chrome">Chrome</option>
+        <option value="edge">Edge</option>
+        <option value="brave">Brave</option>
+        <option value="opera">Opera</option>
+        <option value="vivaldi">Vivaldi</option>
+        <option value="file">cookies.txt file</option>
+      </select>
+      <p class="help">Needed for Instagram, private, members-only and age-restricted videos. Snag reads the sign-in your browser already has; nothing leaves this PC. Chrome-based browsers must be fully closed while downloading.</p>
+      <div class="path-row" id="cookieFileRow" hidden><code id="cookieFile"></code><button class="btn" id="chooseCookie">Choose file</button></div>
+    </div>
+
+    <div class="field">
+      <label class="label" for="concurrent">Downloads at the same time</label>
+      <select id="concurrent">
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <span class="label">Add to each file</span>
+      <label class="check"><input type="checkbox" id="thumbnail"><span>Cover art</span></label>
+      <label class="check"><input type="checkbox" id="metadata"><span>Title, channel and chapters</span></label>
+      <label class="check"><input type="checkbox" id="subtitles"><span>English subtitles, when the video has them</span></label>
+    </div>
+
+    <div class="field">
+      <span class="label">Clipboard</span>
+      <label class="check"><input type="checkbox" id="watchClipboard"><span>Fill in a video link I copy when I come back to Snag</span></label>
+    </div>
+
+    <div class="field">
+      <span class="label">Version</span>
+      <p class="help" id="versionInfo"></p>
+      <button class="btn" id="checkUpdate">Check for updates</button>
+    </div>
+
+    <div class="field">
+      <span class="label">Engine</span>
+      <p class="help" id="engineInfo"></p>
+      <button class="btn" id="installFfmpeg" hidden>Install FFmpeg</button>
+      <button class="btn" id="updateEngine">Check for engine update</button>
+    </div>
+  </aside>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

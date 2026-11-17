@@ -1,0 +1,70 @@
+{
+  "name": "snag",
+  "productName": "Snag",
+  "version": "0.1.0",
+  "description": "Desktop video downloader for YouTube, TikTok, Instagram, X and 1800+ sites (powered by yt-dlp)",
+  "author": "Snag",
+  "main": "src/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "powershell -NoProfile -ExecutionPolicy Bypass -File release.ps1",
+    "release": "powershell -NoProfile -ExecutionPolicy Bypass -File release.ps1 -Publish"
+  },
+  "repository": "github:tuhusr/snag",
+  "build": {
+    "appId": "app.snag.downloader",
+    "productName": "Snag",
+    "copyright": "Snag",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "asar": true,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "tuhusr",
+        "repo": "snag",
+        "releaseType": "release"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "src/renderer/icon.ico",
+      "artifactName": "Snag-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Snag",
+      "installerIcon": "src/renderer/icon.ico",
+      "uninstallerIcon": "src/renderer/icon.ico",
+      "uninstallDisplayName": "Snag",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.3.3",
+    "electron-builder": "^26.18.0"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "electron-updater": "^6.8.11"
+  }
+}

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Snag</title>
+  <rect width="256" height="256" rx="56" fill="#3346FF"/>
+  <path d="M68 68h120v74l-46 46H68z" fill="#FFFFFF"/>
+  <path d="M128 92v54m-23-23 23 23 23-23" fill="none" stroke="#3346FF" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
