@@ -553,6 +553,12 @@ function renderSettings() {
   $('#cookieFileRow').hidden = s.cookies !== 'file';
   $('#cookieFile').textContent = s.cookieFile || 'No file chosen';
   $('#concurrent').value = String(s.concurrent || 3);
+  $('#theme').value = s.theme || 'time';
+  $('#themeHelp').textContent = {
+    time: 'Light from 7:00 AM to 4:59 PM, dark from 5:00 PM to 6:59 AM, by your PC’s clock.',
+    system: 'Follows the light or dark setting in Windows.',
+  }[s.theme || 'time'] || '';
+  $('#themeHelp').hidden = !$('#themeHelp').textContent;
   for (const k of ['thumbnail', 'metadata', 'subtitles', 'watchClipboard']) $(`#${k}`).checked = s[k] !== false && !!(s[k] ?? true);
   $('#subtitles').checked = !!s.subtitles;
 }
@@ -568,6 +574,7 @@ $('#cookies').onchange = async (e) => {
 };
 $('#chooseCookie').onclick = async () => { const f = await window.snag.chooseCookieFile(); if (f) { state.settings.cookieFile = f; save({ cookies: 'file' }); } };
 $('#concurrent').onchange = (e) => save({ concurrent: Number(e.target.value) });
+$('#theme').onchange = (e) => save({ theme: e.target.value });
 for (const k of ['thumbnail', 'metadata', 'subtitles', 'watchClipboard']) $(`#${k}`).onchange = (e) => save({ [k]: e.target.checked });
 $('#chooseFolder').onclick = async () => { const f = await window.snag.chooseFolder(); if (f) { state.settings.folder = f; renderSettings(); toast('New downloads will be saved there'); } };
 $('#updateEngine').onclick = async () => { const r = await window.snag.updateEngine(); toast(r.message); };

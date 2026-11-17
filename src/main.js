@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, nativeTheme, powerMonitor } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -110,6 +110,26 @@ function createWindow() {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
 }
 
+// Appearance. "time" (default): light 7:00 AM to 4:59 PM, dark 5:00 PM to 6:59 AM, by this PC's clock.
+// Setting nativeTheme.themeSource drives the page's prefers-color-scheme and the title bar together.
+const DAY_START = 7, DAY_END = 17;
+const isDaytime = (d = new Date()) => d.getHours() >= DAY_START && d.getHours() < DAY_END;
+let themeTimer = null;
+function applyTheme() {
+  const pref = settings.get('theme') || 'time';
+  const source = pref === 'time' ? (isDaytime() ? 'light' : 'dark') : pref === 'light' || pref === 'dark' ? pref : 'system';
+  if (nativeTheme.themeSource !== source) nativeTheme.themeSource = source;
+  // Wake exactly at the next switch (7:00 or 17:00).
+  clearTimeout(themeTimer);
+  if (pref === 'time') {
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(isDaytime(now) ? DAY_END : DAY_START, 0, 0, 0);
+    if (next <= now) next.setDate(next.getDate() + 1);
+    themeTimer = setTimeout(applyTheme, next - now + 250);
+  }
+}
+
 nativeTheme.on('updated', () => {
   if (!win || win.isDestroyed()) return;
   win.setTitleBarOverlay(theme());
@@ -125,8 +145,13 @@ app.whenReady().then(async () => {
     mode: 'video', height: null, concurrent: 3, fragments: 4,
     cookies: 'none', cookieFile: null,
     metadata: true, thumbnail: true, subtitles: false, watchClipboard: true,
-    lastEngineUpdate: 0,
+    theme: 'time', lastEngineUpdate: 0,
   });
+  applyTheme();
+  // Timers pause while the PC sleeps or the clock jumps; re-check on wake and once a minute.
+  powerMonitor.on('resume', applyTheme);
+  powerMonitor.on('unlock-screen', applyTheme);
+  setInterval(applyTheme, 60 * 1000);
   library = new Store(path.join(data, 'library.json'), { items: [] });
   // One-time move: finished downloads from 0.1.x's list become History entries.
   const oldList = path.join(data, 'history.json');
@@ -271,10 +296,12 @@ ipcMain.handle('choose-cookie-file', async () => {
   return r.filePaths[0];
 });
 
-const SETTABLE = ['mode', 'height', 'concurrent', 'fragments', 'cookies', 'metadata', 'thumbnail', 'subtitles', 'watchClipboard'];
+const SETTABLE = ['mode', 'height', 'concurrent', 'fragments', 'cookies', 'metadata', 'thumbnail', 'subtitles', 'watchClipboard', 'theme'];
 ipcMain.handle('set-settings', (_e, patch) => {
   const clean = Object.fromEntries(Object.entries(patch || {}).filter(([k]) => SETTABLE.includes(k)));
+  if (clean.theme && !['time', 'system', 'light', 'dark'].includes(clean.theme)) delete clean.theme;
   settings.set(clean);
+  if ('theme' in clean) applyTheme();
   pump();
   return settings.data;
 });

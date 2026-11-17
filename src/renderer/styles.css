@@ -52,6 +52,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  transition: background-color 0.4s ease, color 0.4s ease;
 }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
